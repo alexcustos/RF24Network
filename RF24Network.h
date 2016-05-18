@@ -1,6 +1,9 @@
 /*
  Copyright (C) 2011 James Coliz, Jr. <maniacbug@ymail.com>
 
+ Modified by Aleksandr Borisenko to make it compile without arduino core.
+ NOTE: Only the ATmega328P is supported.
+
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
  version 2 as published by the Free Software Foundation.
@@ -18,21 +21,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "RF24Network_config.h"
-
-#if (defined (__linux) || defined (linux)) && !defined (__ARDUINO_X86__)
-  #include <stdint.h>
-  #include <stdio.h>
-  #include <time.h>
-  #include <string.h>
-  #include <sys/time.h>
-  #include <stddef.h>
-  #include <assert.h>
-  #include <map>
-  #include <utility>      // std::pair
-  #include <queue>
-  
-#endif
-
 
 /**
 
@@ -280,11 +268,8 @@ struct RF24NetworkHeader
   * On Arduino, the message buffer is just a pointer, and can be pointed to any memory location.
   * On Linux the message buffer is a standard byte array, equal in size to the defined MAX_PAYLOAD_SIZE
   */
-  #if defined (RF24_LINUX)
-    uint8_t message_buffer[MAX_PAYLOAD_SIZE]; //< Array to store the message
-  #else    
-    uint8_t *message_buffer; //< Pointer to the buffer storing the actual message 
-  #endif
+  uint8_t *message_buffer; //< Pointer to the buffer storing the actual message
+
   /**
    * Default constructor
    *
@@ -312,18 +297,9 @@ struct RF24NetworkHeader
    *
    * Frames are used internally and by external systems. See RF24NetworkHeader.
    */
-#if defined (RF24_LINUX)   
-  RF24NetworkFrame(RF24NetworkHeader& _header, const void* _message = NULL, uint16_t _len = 0) :
-                  header(_header), message_size(_len) {
-    if (_message && _len) {
-      memcpy(message_buffer,_message,_len);
-    }
-  }
-#else  
   RF24NetworkFrame(RF24NetworkHeader &_header, uint16_t _message_size):
                   header(_header), message_size(_message_size){		  
   }
-#endif  
 
 
   /**
@@ -367,7 +343,7 @@ public:
    *
    */
 
-  RF24Network( RF24& _radio );
+  RF24Network( RF24 *_radio );
 
   /**
    * Bring up the network using the current radio frequency/channel.
@@ -492,7 +468,7 @@ public:
    * @param _radio1 The second underlying radio driver instance
    */
    
-  RF24Network( RF24& _radio, RF24& _radio1); 
+  RF24Network( RF24 *_radio, RF24 *_radio1);
   
 	/**
 	* By default, multicast addresses are divided into levels. 
@@ -686,26 +662,7 @@ public:
   
   uint8_t frame_buffer[MAX_FRAME_SIZE];   
 
-  /** 
-   * **Linux** <br>
-   * Data with a header type of EXTERNAL_DATA_TYPE will be loaded into a separate queue.
-   * The data can be accessed as follows:
-   * @code
-   * RF24NetworkFrame f;
-   * while(network.external_queue.size() > 0){
-   *   f = network.external_queue.front();
-   *   uint16_t dataSize = f.message_size;
-   *   //read the frame message buffer
-   *   memcpy(&myBuffer,&f.message_buffer,dataSize);
-   *   network.external_queue.pop();
-   * }
-   * @endcode
-   */
-  #if defined (RF24_LINUX)
-    std::queue<RF24NetworkFrame> external_queue;
-  #endif
-  
-  #if !defined ( DISABLE_FRAGMENTATION ) &&  !defined (RF24_LINUX)
+  #if !defined ( DISABLE_FRAGMENTATION )
   /**
   * **ARDUINO** <br>
   * The frag_ptr is only used with Arduino (not RPi/Linux) and is mainly used for external data systems like RF24Ethernet. When
@@ -787,9 +744,9 @@ public:
   bool logicalToPhysicalAddress(logicalToPhysicalStruct *conversionInfo);
   
   
-  RF24& radio; /**< Underlying radio driver, provides link/physical layers */
+  RF24 *radio; /**< Underlying radio driver, provides link/physical layers */
 #if defined (DUAL_HEAD_RADIO)
-  RF24& radio1;
+  RF24 *radio1;
 #endif
 #if defined (RF24NetworkMulticast)  
   uint8_t multicast_level;  
@@ -799,36 +756,23 @@ public:
   uint8_t frame_size;
   const static unsigned int max_frame_payload_size = MAX_FRAME_SIZE-sizeof(RF24NetworkHeader);
 
-  #if defined (RF24_LINUX)
-    std::queue<RF24NetworkFrame> frame_queue;
-	std::map< uint16_t, RF24NetworkFrame> frameFragmentsCache;
-    bool appendFragmentToFrame(RF24NetworkFrame frame);
-  
-  #else
-    #if  defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny45__) || defined(__AVR_ATtiny85__) || defined(__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
-	  #if !defined (NUM_USER_PAYLOADS)
-		#define NUM_USER_PAYLOADS 3
-	  #endif
-    #endif
-	#if !defined (NUM_USER_PAYLOADS)
-	  #define NUM_USER_PAYLOADS 5
-	#endif
-	  
-	#if defined (DISABLE_USER_PAYLOADS)
-    uint8_t frame_queue[1]; /**< Space for a small set of frames that need to be delivered to the app layer */
-	#else
-	uint8_t frame_queue[MAIN_BUFFER_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
-	#endif
-	
-	uint8_t* next_frame; /**< Pointer into the @p frame_queue where we should place the next received frame */
-	
-	#if !defined ( DISABLE_FRAGMENTATION )
-      RF24NetworkFrame frag_queue;
-      uint8_t frag_queue_message_buffer[MAX_PAYLOAD_SIZE]; //frame size + 1 
-    #endif
-  
+  #if !defined (NUM_USER_PAYLOADS)
+    #define NUM_USER_PAYLOADS 5
   #endif
-  
+	  
+  #if defined (DISABLE_USER_PAYLOADS)
+  uint8_t frame_queue[1]; /**< Space for a small set of frames that need to be delivered to the app layer */
+  #else
+  uint8_t frame_queue[MAIN_BUFFER_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
+  #endif
+	
+  uint8_t* next_frame; /**< Pointer into the @p frame_queue where we should place the next received frame */
+	
+  #if !defined ( DISABLE_FRAGMENTATION )
+    RF24NetworkFrame frag_queue;
+    uint8_t frag_queue_message_buffer[MAX_PAYLOAD_SIZE]; //frame size + 1
+  #endif
+
   //uint8_t frag_queue[MAX_PAYLOAD_SIZE + 11];
   //RF24NetworkFrame frag_queue;
   
@@ -1298,4 +1242,3 @@ public:
  */
 
 #endif // __RF24NETWORK_H__
-
